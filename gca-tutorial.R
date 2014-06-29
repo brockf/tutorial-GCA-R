@@ -11,12 +11,12 @@
 #      visual world paradigm: Growth curves and individual differences. Journal of Memory and
 #      Language, 59, 474–494.
 #
-# author: Brock Ferguson
-# website: brockferguson.com
-#
-# last modified June 29, 2014
-#
 # Requires: install.packages('lmer','ggplot2','plyr','ez')
+#
+# @author: Brock Ferguson
+# @website: brockferguson.com
+#
+# @modified June 29, 2014
 #
 
 #####################################################
