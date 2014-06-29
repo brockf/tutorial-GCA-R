@@ -262,6 +262,10 @@ summary(model)
 
 # in our world of perfect data, it doesn't make much difference, but it's good practice
 
+# visualize our raw data with our model fit on top
+ggplot(data=data, aes(x=Time, y=Accuracy, group=Condition, colour=Condition)) + geom_point() + stat_summary(aes(y=fitted(model)), fun.y=mean, geom="line")
+  # we recovered the original form pretty well!
+
 # what happens we add in the cubic parameter?
 model <- lmer(Accuracy ~ ot1*ot2*ot3*Condition + (1 + ot1 + ot2 + ot3 | Subject), data = data)
 summary(model)
