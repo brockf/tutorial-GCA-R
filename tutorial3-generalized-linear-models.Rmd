@@ -1,0 +1,414 @@
+---
+  title: "R Growth Curve Analysis & Eyetracking Workshop: Tutorial 3: Generalized Linear Models"
+  author: "Brock Ferguson"
+  date: "November 1, 2014"
+  output: html_document
+---
+
+Load required packages.
+
+```{r}
+library(ggplot2)
+library(lme4)
+library(plyr)
+library(ez)
+```
+
+Load our eyetracking dataset. These data are from the familiar world trials for 19-month-olds reported in Ferguson, Graf, & Waxman (2014, Cognition).
+
+```{r}
+data <- read.csv('data-eyetracking.csv')
+```
+
+What kind of columns do we need for these analyses?
+
+```{r}
+summary(data)
+```
+
+This dataset is only a few steps removed from what comes out of the standard eyetracker.
+
+I have done some prep, though:
+
+* removed trackloss
+* converted GazeX and Y columns to AOI 1 or 0 columns
+* merged in subject information
+
+# Analysis 1: By-subjects and By-items ANOVAs
+
+Pros:
+* simple
+* allows for generalization beyond samples participants and sampled items.
+
+Cons:
+* lose all timing information
+* what do we do with ambiguities between analyses?
+
+We need to aggregate across trials by target within participants:
+
+```{r}
+agg_subjects <- ddply(data, .(ParticipantName,Sex,Age,Target),
+                      summarise,
+                      PropAnimal = mean(Animate))
+```
+
+Visualize our aggregated data:
+
+```{r}
+ggplot(agg_subjects, aes(x=Target, y=PropAnimal, fill=ParticipantName)) +
+                                                      geom_bar(stat="identity", position=position_dodge())
+```
+
+It's a weird plot... but looks about right. We'll gradually do more sophisticated and appropriate plots as the workshop moves on.
+
+Use our GLM best practices to prepare and model these data:
+
+```{r}
+agg_subjects$TargetCoded <- -.5
+agg_subjects[which(agg_subjects$Target == 'Artefact'), 'TargetCoded'] <- .5
+```
+
+There's no need to center here because these data are balanced (every subject is present in both conditions). But this is how we would center, anyways:
+
+```{r}
+agg_subjects$TargetCoded <- scale(agg_subjects$TargetCoded, center=T, scale=F)
+```
+
+Here we use aov() because it allows for a repeated-measures Error() term.
+As we learned before, aov() uses Type I sums of squares, but with only one factor (i.e.,no correlation issues), it's safe.
+
+```{r}
+model <- aov(PropAnimal ~ TargetCoded + Error(ParticipantName/TargetCoded), data = agg_subjects)
+summary(model)
+```
+
+Now we can do an ANOVA over items as well:
+
+```{r}
+agg_items <- ddply(data, .(Trial,Target), summarise, PropAnimal = mean(Animate))
+agg_items$TargetCoded <- -.5
+agg_items[which(agg_items$Target == 'Artefact'), 'TargetCoded'] <- .5
+```
+
+Visualize effects by items:
+
+```{r}
+ggplot(agg_items, aes(x=Target, y=PropAnimal, fill=Trial)) +
+  geom_bar(stat="identity", position=position_dodge())
+```
+
+We won't include an Error() term this time, because these items are between-conditions:
+
+```{r}
+model <- aov(PropAnimal ~ TargetCoded, data = agg_items)
+summary(model)
+```
+
+Here, these analyses are both crystal clear (reject the null!) But, in other cases, there can be ambiguity (what if one is significant and the other is marginal?).
+
+Ideally, we could have one test which allows us to control for random trial AND subject factors simultaneously. Enter `lmer()`...
+
+## Analysis 2: Simultaneous Trial and Subject Random Effects
+
+Aggregate data by Trials (Items) and Participants (i.e., one datapoint for each trial).
+
+```{r}
+agg_sub_items <- ddply(data, .(ParticipantName,Trial,Target), summarise, PropAnimal = mean(Animate))
+agg_sub_items$TargetCoded <- -.5
+agg_sub_items[which(agg_sub_items$Target == 'Artefact'), 'TargetCoded'] <- .5
+```
+
+Fit a model allowing the intercept ("1") to vary by both Participants and Trials:
+
+```{r}
+model <- lmer(PropAnimal ~ TargetCoded + (1 | ParticipantName) + (1 | Trial), data = agg_sub_items)
+summary(model)
+```
+
+This looks good, and converges with our previous estimate.
+
+Note that very little variance is being taken care of by Trial, and only slightly more by ParticipantName. This is likely the result of (a) small differences between subjects and trials and, (b) a relatively small dataset. We will want to keep an eye on the Std. Dev. random effects -- when this is essentially 0, we may want to consider using a regular ANOVA.
+
+Let's dive into this model a bit more.
+
+We can see the fixed effects:
+
+```{r}
+fixef(model)
+```
+
+Here, `Intercept` is the overall mean looking to animal. And `TargetCoded` is the decrease in looking when asked to look at the Artefact.
+
+We can also see random effects (some people use these to describe individual differences):
+
+```{r}
+ranef(model)
+```
+
+We can also see what the model's predictions were, for each participant/item:
+
+```{r}
+agg_sub_items$prediction <- predict(model, agg_sub_items)
+
+ggplot(agg_sub_items, aes(x=Trial, y=prediction, color=ParticipantName)) +
+                          geom_point() +
+                          geom_line() +
+                          facet_grid(Target~.)
+```
+
+Importantly, with these models, we aren't limited to varying just the intercept by specific grouping factors. We can also vary slopes (i.e., fixed effects) by participants as well. By adding "Target" as a random slope, we allow the model to vary the magnitude of the difference between Target conditions within participants.
+
+```{r}
+model <- lmer(PropAnimal ~ TargetCoded + (1 + TargetCoded | ParticipantName) + (1 | Trial), data = agg_sub_items)
+summary(model)
+```
+
+We now see an additional random effect by the `ParticipantName` group: `TargetCoded`. It's accounting for a decent proportion of variance.
+
+Look at which participants responded stronger/weaker to the Target manipulation (negative estimate == stronger difference).
+
+```{r}
+ranef(model)
+```
+
+With this random slope, we see more variation now in our predictions between subjects.
+
+```{r}
+agg_sub_items$prediction <- predict(model, agg_sub_items)
+ggplot(agg_sub_items, aes(x=Trial, y=prediction, color=ParticipantName)) +
+                                    geom_point() +
+                                    geom_line() +
+                                    facet_grid(Target~.)
+```
+
+By now, you might be asking yourself two very important questions:
+
+### Which random effect structure should we specify?
+
+One school of thought (see Barr et al., 2013) is to "keep it maximal:" Include every random effect that your experimental design permits (i.e., every factor that appeared across subjects or trials; and every meaningful grouping).
+
+A second proposal is to use model comparison to see if the model with more random slopes is better. If a significantly better fit, keep it. Otherwise, abandon the more complex model.
+
+```{r}
+  model1 <- lmer(PropAnimal ~ TargetCoded + (1 + TargetCoded | ParticipantName) + (1 | Trial), data = agg_sub_items)
+  model2 <- lmer(PropAnimal ~ TargetCoded + (1 | ParticipantName) + (1 | Trial), data = agg_sub_items)
+  anova(model1,model2) # -2 log-likelihood ratio test, gives you Chisq(df) = X and a p-value.
+```
+
+A third point to consider, already mentioned, is how much work the random effects are actually doing for you. Are they accounting for any variance? Just look at the Std. Dev. of random effects in your model output to evaluate.
+
+A final thing to keep in mind is that we can overparameterize small datasets fairly quickly, leading to convergence issues (i.e., the model fits the data exactly early in its convergence algorithm) or an error from `lmer()`:
+
+```{r}
+#model <- lmer(PropAnimal ~ TargetCoded + (1 + TargetCoded + Trial | ParticipantName) + (1 | Trial), data = agg_sub_items)
+```
+
+The model above, if run, throws an error because the random structure `(1 + TargetCoded + Trial | ParticipantName)` accounts for ALL data, because each combination of these random factors specifies a single datapoint.
+   
+## How do we get p-values for specific factors?
+
+Unlike lm() and aov(), lmer() doesn't generate p-values... It's unclear, in these kinds of models, how to calculate the degrees of freedom -- required by the 't' statistic in order to get a p-value.
+
+We have several options, though:
+
+### Use model comparison
+
+Fit your model with the factor of interest:
+
+```{r}
+model <- lmer(PropAnimal ~ TargetCoded + (1 + TargetCoded | ParticipantName) + (1 | Trial), data = agg_sub_items)
+```
+
+Fit a second model without this factor:
+
+```{r}
+model_null <- lmer(PropAnimal ~ 1 + (1 + TargetCoded | ParticipantName) + (1 | Trial), data = agg_sub_items)
+anova(model,model_null)
+```
+
+In this test, the degrees of freedom represent the difference between the number of parameters in the models. Note that this will be [NUMBER OF LEVELS - 1] for a removed factor, i.e., it can be >1 for a single factor.
+
+For many factors, this process can be automated with `drop1()`:
+
+```{r}
+drop1(model,~.,test="Chisq")
+```
+
+### Treat the t's as z's
+
+This is not as dangerous as it sounds with sufficient sample sizes.
+
+```{r}
+model <- lmer(PropAnimal ~ TargetCoded + (1 + TargetCoded | ParticipantName) + (1 | Trial), data = agg_sub_items)
+ts <- fixef(model)/sqrt(diag(vcov(model)))
+ts
+2*pnorm(abs(ts),lower.tail=FALSE)
+```
+
+### Just use confidence intervals (new statistics!)
+
+```{r}
+confint(model)
+```
+
+### Use an available technique to approximate the degrees of freedom
+
+Kenward-Roger approximation:
+
+```{r}
+library(pbkrtest)
+model <- lmer(PropAnimal ~ TargetCoded + (1 + TargetCoded | ParticipantName) + (1 | Trial), data = agg_sub_items)
+model_null <- lmer(PropAnimal ~ 1 + (1 + TargetCoded | ParticipantName) + (1 | Trial), data = agg_sub_items)
+KRmodcomp(model,model_null)
+detach('package:pbkrtest',unload=TRUE)
+```
+
+Satterthwaite approximation:
+
+```{r}
+library(lmerTest)
+model <- lmer(PropAnimal ~ TargetCoded + (1 + TargetCoded | ParticipantName) + (1 | Trial), data = agg_sub_items)
+summary(model)
+detach('package:lmerTest',unload=TRUE)
+```
+
+# Analysis 3: Linear time analyses
+
+All of the analyses thus far have thrown out the time information as part of step 1. How can we look at behaviour over time?
+
+One way to do this is to use logistic regression (family:"binomial") on our nearly-raw dataset, predicting the value of looking to the Animate or not (1 or 0). This model estimates the log-odds (i.e., probability in logit space) of looking at the animal by the fixed and random factors specified, including a factor for `TimeFromSubphaseOnset`.
+
+Logistic regression solves a problem we are now going to start taking seriously. Previously, we were predicting bounded, non-linear proportional data using a linear model. With logistic regression, and future linear models in which we employ transformations, we are going to correct for this.
+
+Run a logistic regression model:
+
+```{r}
+model <- glmer(Animate ~ Target*TimeFromSubphaseOnset + (1 | Trial) + (1 | ParticipantName), data = data, family="binomial")
+summary(model)
+```
+
+We are getting some warnings, here. It suggests we should rescale our variables (likely because Target range is -.5 to .5 while TimeFromSubPhaseOnset is 0-5500), and reports a convergence error.
+
+Let's try fixing the scale issue...
+
+```{r}
+data$TimeS <- data$TimeFromSubphaseOnset / 1000
+
+model <- glmer(Animate ~ Target*TimeS + (1 | Trial) + (1 | ParticipantName), data = data, family="binomial")
+summary(model)
+```
+
+No errors!
+  
+Let's interpret these effects - what do main effects and interactions mean?
+
+Visualuze the fitted model:
+
+```{r}
+data$prediction <- predict(model, data)
+
+# in logit space...
+ggplot(data, aes(x=TimeS, y=prediction, color=Target)) +
+                                                            geom_point()
+
+# as proportions...
+data$prediction_prob <- exp(data$prediction) / (exp(data$prediction) + 1)
+ggplot(data, aes(x=TimeS, y=prediction_prob, color=Target)) +
+                              stat_summary(fun.y=mean, geom="point")
+```
+
+This plot doesn't look too much like our actual data (we are working our way towards proper visualizations), though we are starting to see the "gist" of the pattern.
+
+One clear issue is that it thinks there's a difference at timepoint 0 (i.e., the main effect of Target) despite the fact that our actual groups don't diverge until later in the trial. This is because we are only looking at linear growth over time, but we'll be able to address with growth curve analyses, later.
+
+## Empirical logit analysis
+
+Dale Barr suggests a particular kind of linear time analysis: aggregated empirical logit.
+
+Pros:
+* By time aggregation, we somewhat address the problem of interdependence between ms-by-ms observations.
+* Empirical logit aggregation allows us to approximate the logistic curve with a linear model. (see also: arcsine-root transformation)
+
+Cons:
+* Because we are aggregating, we might want to do separate subject and items analyses again...
+* We are still only looking at linear growth over time
+
+Let's do an empirical logit analysis.
+
+First, bin the data:
+
+```{r}
+# bin data into 50ms bins using the modulus operator
+data$Bin <- data$TimeFromSubphaseOnset %/% 50
+
+# equivalent: data$Bin <- floor(data$TimeFromSubphaseOnset / 50)
+head(data[, c('TimeFromSubphaseOnset','Bin')])
+```
+
+Now aggregate across bins by participants (note, you can do this by items as well in a secondary analysis). Calculate the proportion of looking to the animal (PropAnimal), as well as the number of samples looking to the Animal (y), and the total number of samples (N), and the start of the Bin in ms (Time).
+
+Note: We lose the Trial grouping variable/random effect, because we aggregate across trials. This is why it's recommended that you do a by-items aggregation as well.
+
+```{r}
+binned <- ddply(data, .(ParticipantName,Target,Bin), summarise, PropAnimal = mean(Animate), y = sum(Animate), N = length(Animate), TimeS = min(TimeS))
+```
+
+Calculate the empirical logit (log-odds with a constant value to keep from getting -Infinity):
+
+```{r}
+binned$elog <- log( (binned$y + .5) / (binned$N - binned$y + .5) )
+```
+
+Barr also recommends that we calculate weights which, in weighted linear regression,
+increase/decrease the weight of the error at each timepoint; more samples == higher weighted error.
+
+```{r}
+binned$wts <- 1/(binned$y + .5) + 1/(binned$N - binned$y + .5)
+```
+
+Fit an unweighted empirical logit model:
+
+```{r}
+model <- lmer(elog ~ Target*TimeS + (1 | ParticipantName), data = binned)
+summary(model)
+```
+  
+Notice the empirical logit estimates are very similar to our actual logits from the previous logistic model.
+
+We can also account for `Target` and `TimeS` random slopes by Participant. Accounting for Time as a random effect is always recommended -- lots of individual noise here.
+
+```{r}
+model <- lmer(elog ~ Target*TimeS + (1 + Target + TimeS | ParticipantName), data = binned)
+summary(model)
+```
+
+Compare to a weighted empirical logit model:
+
+```{r}
+model <- lmer(elog ~ Target*TimeS + (1 + Target + TimeS | ParticipantName), data = binned, weights = 1/wts)
+summary(model)
+```
+
+Another transformation we can use, beside the empirical logit, is the Arcsine-root transformation. Just like logits and empirical logits, it "stretches out" the ceiling and floor of the distribution, transforming the natural logistic curve inherent to probabilities to be appropriate for linear models.
+
+```{r}
+asin(sqrt(.5))
+asin(sqrt(.6))
+asin(sqrt(.95))
+asin(sqrt(.99))
+
+plot(seq(.0,1,by=.1),asin(sqrt(seq(0,1,by=.1))))
+
+binned$Arcsin <- asin(sqrt(binned$PropAnimal))
+head(binned)
+
+model <- lmer(Arcsin ~ Target*TimeS + (1 + Target + TimeS | ParticipantName), data = binned)
+summary(model)
+```
+
+Clean up our workspace.
+
+```{r}
+ls()
+rm(list=ls())
+```

@@ -275,5 +275,5 @@ summary(model)
 
 model_null <- lmer(Accuracy ~ ot1*ot2*Condition + (1 + ot1 + ot2 + ot3 | Subject), data = data)
 anova(model,model_null)
-  # p ~ .67... nope
+  # p ~ .78... nope
 
