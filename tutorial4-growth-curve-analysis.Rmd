@@ -1,8 +1,11 @@
 ---
   title: "R Growth Curve Analysis & Eyetracking Workshop: Tutorial 4: Growth Curve Analyses"
   author: "Brock Ferguson"
-  date: "November 1, 2014"
-  output: html_document
+  date: "July 1, 2015"
+  output:
+    html_document:
+      toc: true
+      theme: readable
 ---
 
 Load required packages.
@@ -10,8 +13,7 @@ Load required packages.
 ```{r}
 library(ggplot2)
 library(lme4)
-library(plyr)
-library(ez)
+library(dplyr)
 ```
 
 Load our eyetracking data.
@@ -20,63 +22,85 @@ Load our eyetracking data.
 data <- read.csv('data-eyetracking.csv')
 ```
 
-Note: In this tutorial, we will do by-subjects time analyses only (aggregating across trials within-subjects) for simplicity but you can do by-items/trials analyses in the same way.
+Note: In this tutorial, we will do by-subjects time analyses only (aggregating across trials within-subjects) for simplicity but you can do by-items/trials analyses in the same way if you aggregate within trials instead of subjects.
+
+# Bin data within participants by time
 
 Let's prep these data for analysis much like we prepped for the empirical logit analysis.
 
 ```{r}
-# rescale Time to solve convergence issues
-data$TimeS <- data$TimeFromSubphaseOnset / 1000
-
-# aggregate to subjects by 50ms
-data$Bin <- data$TimeFromSubphaseOnset %/% 50
-
-# aggregate by bins
-binned <- ddply(data, .(ParticipantName,Target,Bin), summarize, PropAnimal = mean(Animate), y = sum(Animate), N = length(Animate), TimeS = min(TimeS))
-
-# calculate the empirical logit and weights, if we want them
-binned$elog <- log( (binned$y + .5) / (binned$N - binned$y + .5) )
-binned$wts <- 1/(binned$y + .5) + 1/(binned$N - binned$y + .5)
-
-# calculate the ArcSin, another option...
-binned$Arcsin <- asin(sqrt(binned$PropAnimal))
+# rescale, bin, aggregate, and transform our DV's all in one step
+binned <- data %>%
+        mutate(TimeS = TimeFromSubphaseOnset / 1000,
+               Bin = TimeFromSubphaseOnset %/% 50) %>% # re-scale, bin
+        group_by(ParticipantName,Target,Bin) %>% # aggregate within bins
+        summarise(PropAnimal = mean(Animate), y = sum(Animate), N = length(Animate), TimeS = min(TimeS)) %>%
+        mutate(elog = log( (y + .5) / (N - y + .5) ), # empirical logit
+               wts = 1/(y + .5) + 1/(N - y + .5), # optional weights
+               Arcsin = asin(sqrt(PropAnimal))) %>% # arcsin-sqrt 
+        ungroup()        
 ```
+
+# Fit our old linear model
 
 Here's a model similar to the linear model we had before :
 
 ```{r}
-model <- lmer(elog ~ Target*TimeS + (1 + Target + TimeS | ParticipantName), data = binned)
+binned$TargetC <- ifelse(binned$Target == 'Animal', .5, -.5)
+binned$TargetC <- scale(binned$TargetC, center=T, scale=F)
+
+model <- lmer(elog ~ TargetC*TimeS + (1 + TargetC + TimeS | ParticipantName), data = binned)
 summary(model)
 ```
 
-Visualize the data and model fit in a different (and better) way than we have before:
+Visualize the data and model fit:
 
 ```{r}
 ggplot(binned, aes(x=TimeS, y=elog, color=Target)) +
-                                 stat_summary(fun.y=mean, geom="point") +
-                                 stat_summary(aes(y=predict(model,binned,re.form=NA)), fun.y=mean, geom="line")
+                     stat_summary(fun.y=mean, geom="point") +
+                     stat_summary(aes(y=predict(model,binned,re.form=NA)), fun.y=mean, geom="line")
 ```
 
 We already know that this model isn't a great fit to our data. By assuming linear growth, it gives us weird estimates, one major one being that it thinks our two groups differ at timepoint 0 (which we know not to be true -- the differences emerge over time).
 
+# Natural polynomial growth curve analysis
+
 Let's do our first stab at examining non-linear growth by creating and entering natural polynomials into the model.
 
 ```{r}
-binned$TimeS_2 <- binned$TimeS^2
-binned$TimeS_3 <- binned$TimeS^3
-binned$TimeS_4 <- binned$TimeS^4
+binned <- binned %>%
+          mutate(TimeS_2 = TimeS^2,
+                 TimeS_3 = TimeS^3,
+                 TimeS_4 = TimeS^4)
 
 head(binned)
 
-plot(binned$TimeS, binned$TimeS_2)
-plot(binned$TimeS, binned$TimeS_3)
-plot(binned$TimeS, binned$TimeS_4)
+ggplot(binned, aes(x=TimeS, y=TimeS)) +
+               geom_point() +
+               geom_point(aes(y=TimeS_2), color='red') +  
+               geom_point(aes(y=TimeS_3), color='blue') +
+               geom_point(aes(y=TimeS_4), color='green')
+```
 
+Each natural polynomial accelerates at a different rate. These have an interesting property in that, when combined, they capture the correlates/estimated slopes of a variable at successive "bends" in the data. i.e., The 2nd (quadratic) polynomial will capture the first bend, the 3rd (cubic) polynomial will capture the second bend, and so on.
+
+In this way, models that include these natural polynomials can model non-linear growth.
+
+```{r}
 model <- lmer(elog ~ Target*(TimeS + TimeS_2 + TimeS_3 + TimeS_4) + (1 + Target + TimeS + TimeS_2 + TimeS_3 + TimeS_4 | ParticipantName), data = binned)
 summary(model)
 ```
   
-We have some convergence issues (too many parameters?), so let's scale back on these polynomials to something that seems more reasonable. A good rule of thumb is to count the number of "bends" in the data. One bend == quadratic. Two bends == cubic, etc.
+We have some convergence issues caused by overparameterization, so let's scale back on these polynomials to something that seems more reasonable. A good rule of thumb is to count the number of "bends" in the data before breaking it down by condition.
+
+How many bends do we see?
+
+```{r}
+ggplot(binned, aes(x=TimeS, y=elog)) +
+               stat_smooth(method="loess")
+```
+
+There looks to be two bends in the data which, because of the N-1 relationship between polynomials and bends, means we should include 3 polynomial terms.
 
 ```{r}
 model <- lmer(elog ~ Target*(TimeS + TimeS_2 + TimeS_3) + (1 + Target + TimeS + TimeS_2 + TimeS_3 | ParticipantName), data = binned)
@@ -85,7 +109,7 @@ summary(model)
 
 There is still a convergence error, likely because the scales of our variables are too different, like before. We will ignore this for now, because our final GCA approach will fix this.
 
-Let's just see what this model did for us, in the mean time. Looking at the estimates above, it seems to have gotten rid of our timepoint 0 main effect of Target (yes!), and instead shows some strong interactions over time. This seems promising... but let's visualize.
+In the mean time, let's see what this model did for us. Looking at the estimates above, it seems to have gotten rid of our timepoint 0 main effect of Target (yes!), and instead shows some strong interactions over time. This seems promising... but let's visualize.
 
 ```{r}
 ggplot(binned, aes(x=TimeS, y=elog, color=Target)) +
@@ -101,21 +125,26 @@ Let's store this model because are going to use it for comparison later.
 natural_model <- model
 ```
 
+# Orthogonal polynomial growth curve analysis
+
+## Solving the multicollinearity of natural polynomials
+
 We just did our first non-linear growth curve analysis, but it was sub-optimal for two reasons:
-* these polynomial terms we generated are correlated with each other
-* our model had trouble converging because of the different scales of our DV's
 
-Thankfully, we have something that will help: *orthogonal polynomials*. All credit for the analysis procedure below goes to Dan Mirman.
+(1) these polynomial terms we generated are highly correlated with one another, and multicollinearity in linear models is always bad
+(2) our model had trouble converging because of the different scales of our DV's
 
-As it stands, our natural polynomial are highly correlated with each other.
+Thankfully, we have something that will help: *orthogonal polynomials*.
+
+Let's first consider problem (1): our natural polynomial are highly correlated with each other. Here you can see this in a standard correlation matrix.
 
 ```{r}
 cor(binned[, c('TimeS','TimeS_2','TimeS_3','TimeS_4')])
 ```
 
-This is not a good thing when we are trying to attribute variance to each factor independently. This isn't unique to time-based models -- any linear model suffers from autocorrelation.
+This is not a good thing when we are trying to attribute variance to each factor independently. This isn't unique to time-based models -- any linear model suffers from multicollinearity.
 
-So, what we can do is actually create replacement timecodes for linear, quadratic, cubic, etc. change over time that we know will be uncorrelated.
+So, what we can do is actually create replacement timecodes for linear, quadratic, cubic, etc. change over time that we *know* by design will be uncorrelated.
 
 `poly()` will generate higher-order polynomials for us, with a vector length equivalent to the length of our original time vector.
 
@@ -128,9 +157,17 @@ head(orthogonal_polynomials)
 
 Column 1 grows linearly. Column 2 grows quadratically. Column 3 grows cubicly... etc.
 
-Verify that they are indeed uncorrelated.
+Visualize this, and verify that they are indeed uncorrelated.
 
 ```{r}
+ggplot(data.frame(orthogonal_polynomials), aes(x=X1, y=X1)) +
+               geom_point() +
+               geom_point(aes(y=X2), color='red') +  
+               geom_point(aes(y=X3), color='blue') +
+               geom_point(aes(y=X4), color='green') +
+               geom_point(aes(y=X5), color='purple') +
+               geom_point(aes(y=X6), color='yellow')
+
 cor(orthogonal_polynomials[, c(1:6)])
 round(cor(orthogonal_polynomials[, c(1:6)]),5)
 ```
@@ -149,16 +186,18 @@ colnames(time_codes) <- c('TimeS','ot1','ot2','ot3','ot4','ot5','ot6')
 binned <- merge(binned, time_codes, by='TimeS')
 ```
 
-Now let's model our data using these orthogonal polynomials:
+## Orthogonal modeling
+
+Now let's model our data exactly like we did before but using these orthogonal polynomials:
 
 ```{r}
-model <- lmer(elog ~ Target*(ot1 + ot2 + ot3) + (1 + Target + ot1 + ot2 + ot3 | ParticipantName), data = binned)
+model <- lmer(elog ~ TargetC*(ot1 + ot2 + ot3) + (1 + TargetC + ot1 + ot2 + ot3 | ParticipantName), data = binned)
 summary(model)
 ```
 
 Great fit! No errors.
 
-Interestingly, we are back to seeing a main effect of `TargetArtefact`, though... Why? This leads to an important point: our natural polynomials all started at Timepoint 0, meaning that main effects represented differences at the *start* of the time window. In contrast, orthogonal polynomials are centered at 0, meaning that main effects represent *average* differences between levels of a factor.
+Interestingly, we are back to seeing a main effect of `TargetArtefact`, though... Why? The reason is simple: Our natural polynomials all started at Timepoint 0, meaning that main effects represented differences at the *start* of the time window. In contrast, orthogonal polynomials are, by default, centered at 0, meaning that main effects represent *average* differences (across time) between levels of a factor.
 
 Let's visualize our data and model fit:
 
@@ -184,44 +223,62 @@ We can use the same methods as before to get confidence intervals, test for Type
 drop1(model, ~., test="Chisq")
 ```
 
-`drop(1) suggests that all of our parameters are reliable predictors, but let's try comparing models with and without each timecode.
+`drop1()` suggests that all of our parameters are reliable predictors.
+
+Let's try adding 4th and 5th orthogonal polynomials manually and seeing their effects on this model.
 
 ```{r}
-model_quartic <- lmer(elog ~ Target*(ot1 + ot2 + ot3 + ot4) + (1 + Target + ot1 + ot2 + ot3 + ot4 | ParticipantName), data = binned)
+model_quartic <- lmer(elog ~ TargetC*(ot1 + ot2 + ot3 + ot4) + (1 + TargetC + ot1 + ot2 + ot3 + ot4 | ParticipantName), data = binned)
 summary(model_quartic)
 
 ggplot(binned, aes(x=TimeS, y=elog, color=Target)) +
   stat_summary(fun.y=mean, geom="point") +
   stat_summary(aes(y=predict(model,binned,re.form=NA)), fun.y=mean, geom="line", linetype='dashed') + # 3rd-order model
   stat_summary(aes(y=predict(model_quartic,binned,re.form=NA)), fun.y=mean, geom="line") # 4th-order model
-  
-model_quintic <- lmer(elog ~ Target*(ot1 + ot2 + ot3 + ot4 + ot5) + (1 + Target + ot1 + ot2 + ot3 + ot4 + ot5 | ParticipantName), data = binned)
-summary(model_quintic)
+
+anova(model, model_quartic)
+```
+
+Despite the very underwhelming difference in model fits, model comparison says that `ot4` is a significant predictor.
+
+One possibility is that this significant difference is because we not only added `ot4` as a fixed effect, we also added it to the random structure. When examining the influence of a fixed effect, it's best to keep your random effect structure constant. The fact that we changed our random structure is why the `anova()` says that our models differ by 8 degrees of freedom when we only wanted to see the influence of the main effect of `ot4` and its interaction with `TargetC` (i.e., two parameters or 2 df difference).
+
+```{r}
+model_cubic <- lmer(elog ~ TargetC*(ot1 + ot2 + ot3) + (1 + TargetC + ot1 + ot2 + ot3 + ot4 | ParticipantName), data = binned, REML=F)
+
+model_quartic <- lmer(elog ~ TargetC*(ot1 + ot2 + ot3 + ot4) + (1 + TargetC + ot1 + ot2 + ot3 + ot4 | ParticipantName), data = binned, REML=F)
+
+anova(model_cubic, model_quartic)
+```
+
+Despite the underwhelming difference in visualized model fits, it still says it's a significantly better fit.
+
+What about a 5th polynomial?
+
+```{r}
+model_quartic <- lmer(elog ~ TargetC*(ot1 + ot2 + ot3 + ot4) + (1 + TargetC + ot1 + ot2 + ot3 + ot4 + ot5 | ParticipantName), data = binned, REML=F)
+
+model_quintic <- lmer(elog ~ TargetC*(ot1 + ot2 + ot3 + ot4 + ot5) + (1 + TargetC + ot1 + ot2 + ot3 + ot4 + ot5  | ParticipantName), data = binned, REML=F)
 
 ggplot(binned, aes(x=TimeS, y=elog, color=Target)) +
   stat_summary(fun.y=mean, geom="point") +
   stat_summary(aes(y=predict(model_quartic,binned,re.form=NA)), fun.y=mean, geom="line", linetype='dashed') + # 4th-order model
   stat_summary(aes(y=predict(model_quintic,binned,re.form=NA)), fun.y=mean, geom="line") # 5th-order model
 
-# what if we strip away factors?
-model_quadratic <- lmer(elog ~ Target*(ot1 + ot2) + (1 + Target + ot1 + ot2 | ParticipantName), data = binned)
-summary(model_quadratic)
-
-ggplot(binned, aes(x=TimeS, y=elog, color=Target)) +
-  stat_summary(fun.y=mean, geom="point") +
-  stat_summary(aes(y=predict(model,binned,re.form=NA)), fun.y=mean, geom="line", linetype='dashed') + # 3rd-order model
-  stat_summary(aes(y=predict(model_quadratic,binned,re.form=NA)), fun.y=mean, geom="line") # 2nd-order model
+anova(model_quartic, model_quintic)
 ```
 
-And a reminder of how bad our linear model was:
+Adding a 5th polynomial did not improve our fit.
+
+Here's a final reminder of how bad our linear model was:
 
 ```{r}
-model_linear <- lmer(elog ~ Target*(ot1) + (1 + Target + ot1 | ParticipantName), data = binned)
+model_linear <- lmer(elog ~ TargetC*(ot1) + (1 + TargetC + ot1 | ParticipantName), data = binned)
 summary(model_linear)
 
 ggplot(binned, aes(x=TimeS, y=elog, color=Target)) +
   stat_summary(fun.y=mean, geom="point") +
-  stat_summary(aes(y=predict(model,binned,re.form=NA)), fun.y=mean, geom="line", linetype='dashed') + # 3rd-order model
+  stat_summary(aes(y=predict(model_quartic,binned,re.form=NA)), fun.y=mean, geom="line", linetype='dashed') + # 3rd-order model
   stat_summary(aes(y=predict(model_linear,binned,re.form=NA)), fun.y=mean, geom="line") # 2nd-order model
 ```
 
@@ -229,13 +286,13 @@ ggplot(binned, aes(x=TimeS, y=elog, color=Target)) +
 
 I like to design experiments with only 2 levels per factor for simplicity but sometimes we have 3 levels in a factor and, now, main effects do not equal simple effects.
 
-To demonstrate, let's add a third "Neutral" Target level that will mirror the Animal level.
+To demonstrate, let's add a third "Neutral" Target level that will follow a similar trajectory to the "Animal" level but shifted down towards 50% chance.
 
 ```{r}
 new_condition <- binned[which(binned$Target == 'Animal'), ]
 new_condition$Target <- 'Neutral'
 #new_condition$y <- new_condition$y - round(new_condition$N / 3)
-new_condition$y <- new_condition$y + round(rnorm(length(new_condition$y),0,2))
+new_condition$y <- new_condition$y + round(rnorm(length(new_condition$y),-.5,2))
 new_condition$y <- ifelse(new_condition$y > new_condition$N,new_condition$N,new_condition$y)
 new_condition[which(new_condition$y < 1), 'y'] <- 1
 new_condition$PropAnimal <- new_condition$y / new_condition$N
@@ -250,7 +307,7 @@ ggplot(binned_3levels, aes(x=TimeS, y=elog, color=Target)) +
   stat_summary(fun.y=mean, geom="point")
 ```
 
-Fit a model:
+Fit a model with Target treatment-coded.
 
 ```{r}
 model <- lmer(elog ~ Target*(ot1 + ot2 + ot3) + (1 + Target + ot1 + ot2 + ot3 | ParticipantName), data = binned_3levels)
@@ -258,16 +315,18 @@ summary(model)
 
 ggplot(binned_3levels, aes(x=TimeS, y=elog, color=Target)) +
   stat_summary(fun.y=mean, geom="point") +
-  stat_summary(aes(y=predict(model,binned_3levels,re.form=NA)), fun.y=mean, geom="line", linetype='dashed') # 3rd-order model
+  stat_summary(aes(y=predict(model,binned_3levels,re.form=NA)), fun.y=mean, geom="line")
 ```
+
+In order to know how to interpret these simple effects, we need to remember which is our reference level.
 
 Get main effects via model comparison...
 
 ```{r}
-  model_null <- lmer(elog ~ Target*(ot1 + ot2) + ot3 + (1 + Target + ot1 + ot2 + ot3 | ParticipantName), data = binned_3levels)
-  summary(model_null)
-  
-  anova(model,model_null)
+model_null <- lmer(elog ~ Target*(ot1 + ot2) + ot3 + (1 + Target + ot1 + ot2 + ot3 | ParticipantName), data = binned_3levels)
+summary(model_null)
+
+anova(model,model_null)
 ```
 
 Get simple effects by re-ordering factor levels.

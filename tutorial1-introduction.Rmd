@@ -1,17 +1,20 @@
 ---
   title: "R Growth Curve Analysis & Eyetracking Workshop: Tutorial 1: Introduction to R"
   author: "Brock Ferguson"
-  date: "November 1, 2014"
-  output: html_document
+  date: "July 1, 2015"
+  output:
+    html_document:
+      toc: true
+      theme: readable
 ---
 
 # Dependencies
   
-Install the packages we'll be using today.
+Install the packages we'll be using today, and load ggplot -- which we'll use in this first tutorial.
 
-```{r}
-# install.packages('reshape2','plyr','ggplot2','lme4','lmerTest','ez')
-# commented out because I already have them
+```{r quiet=T}
+# commented out because I already have these
+# install.packages('reshape2','dplyr','ggplot2','lme4','lmerTest'')
 
 library(ggplot2)
 ```
@@ -46,7 +49,7 @@ vocab <- vocab[, c(2:7)]
 summary(vocab)
 ```
 
-We can select one column and assign it to a particular vector variable.
+We can select one column and assign it to a new vector variable.
 
 ```{r}
 medians <- vocab[, 'median']
@@ -54,14 +57,14 @@ medians <- vocab[, 'median']
 
 This vector is now listed in the Environment as well -- under "values".
 
-We can also select rows by number.
+We can also select rows by number. Because we haven't assigned their values to a new variable, they will just be printed to the screen.
 
 ```{r}
 vocab[c(1:5), ]
 vocab[c(1,2,3,4,5), ]
 ```
 
-... Or combine row and column selections.
+... Or combine row and column selections...
 
 ```{r}
 vocab[5, 'gender']
@@ -112,7 +115,9 @@ exp(medians)
 sqrt(medians)
 ```
 
-We can also use summary functions to boil it down to a meaningful metric:
+Those vectorized functions return new vectors that have been transformed in some way.
+
+We can also use summary functions to boil our medians vector down to a single meaningful metric:
 
 ```{r}
 mean(medians)
@@ -126,7 +131,7 @@ nrow(vocab)
 ncol(vocab)
 ```
 
-Or combine summary functions and mathematical operators to do useful things, like
+Or combine summary functions and vector transformations to do useful things, like
 calculate z-scores:
 
 ```{r}
@@ -149,8 +154,11 @@ paste('median: ',medians,sep='')
 And, of course, we can perform operations involving multiple vectors:
 
 ```{r}
-medians * rnorm(1, 0, 1) # vector * integer
-medians * rnorm(length(medians), 0, 1) # vector * vector
+# vector * integer
+medians * rnorm(1, 0, 1)
+
+# vector * vector
+medians * rnorm(length(medians), 0, 1)
 ```
 
 # Visualization
@@ -182,8 +190,7 @@ ggplot(vocab, aes(x=age, y=median, fill=gender)) +
         scale_y_continuous(name="Productive Vocabulary")
 ```
 
-We'll be using simple ggplots in these tutorials, but the web documentation is great at helping you
-create publishable figures of any kind.
+We'll gradually use more and more advanced aspects of ggplot throughout these tutorials. For now, we are simply plotting single variables from a dataframe (much like we could with Excel). However, by the 4th tutorial, we'll be using ggplot to group, transform, and summarize our (almost) raw data and visualize it in a single shot.
 
 # Statistical tests and models
 
@@ -210,10 +217,10 @@ abline(lm(female_vocab$median ~ female_vocab$age))
 ```
 
 We'll get more into the syntax of `lm()` later, but this function uses a linear model
-to predict the 'median' vector from the 'age' vector, then feeds this to abline()
+to predict the 'median' vector from the 'age' vector, then feeds this to `abline()`
 to plot this line of best fit.
 
-We can do the same thing with ggplot:
+We can do the same thing with ggplot, though it is nice enough to give us the SE around our linear model fit:
 
 ```{r}
 ggplot(female_vocab, aes(x=age, y=median)) +
@@ -280,7 +287,7 @@ Let's run another statistical test on some random data. A Welch's t-test:
 t.test(rnorm(30,5,5), rnorm(30,10,5))
 ```
 
-We can pass specific options to these tests. One common option for 't.test' is var.equal=T so that we run a standard Student t-test.
+We can pass specific options to these tests. One common option for 't.test' is var.equal=T so that we run a standard Student t-test rather than a Welch's t-test.
 
 ```{r}
 t.test(rnorm(30,5,5), rnorm(30,10,5), var.equal=T)

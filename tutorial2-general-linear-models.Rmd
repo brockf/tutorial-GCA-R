@@ -1,8 +1,11 @@
 ---
   title: "R Growth Curve Analysis & Eyetracking Workshop: Tutorial 2: General Linear Models"
   author: "Brock Ferguson"
-  date: "November 1, 2014"
-  output: html_document
+  date: "July 1, 2015"
+  output:
+    html_document:
+      toc: true
+      theme: readable
 ---
   
 Load packages we'll be using:
@@ -17,7 +20,7 @@ Load in our vocabulary data again.
 vocab <- read.csv('data-vocab.csv')
 ```
 
-# Simple one parameter models
+# Introduction to lm()
 
 Re-run our correlation as a basic linear model:
 
@@ -35,12 +38,12 @@ print(model)
 
 summary(model)
 
-anova(model)
-
 plot(model)
 ```
 
-Let's do some analyses with our vocab dataset to compare the different linear modelling
+# lm() and aov() comparison
+
+Let's do some analyses with our vocab dataset to compare the different linear modeling
 methods made available by R.
 
 First, let's begin by visualizing the raw data again:
@@ -52,107 +55,110 @@ ggplot(vocab, aes(x=age, y=median, color=gender)) +
                     scale_y_continuous(name="Productive Vocabulary")
 ```
 
-Note: We are treating each datapoint here as if it were a different subject, as if they were
-1 subject of each gender at each age. This is just for simplicity.
+## Single factor models
 
-Let's compare `lm()` (Linear Model), `aov()` (Analysis of Variance), and `anova()` (another kind of Analysis of Variance) with different kinds of models.
+Let's compare `lm()` (Linear Model) and `aov()` (Analysis of Variance) in modeling these data.
 
-`aov()` uses Type I sums of squares, thus calculating hte effect of each factor above and beyond
-each factor that has already been entered in the model (from left-to-right). This kind of model,
-which is sensitive to the order of parameters in the model definition, is likely *not* 
-what you want.
-
-`lm()` can give us Type III sums of squares, which do not have this property, if we properly
-code and center each variable.
+Note: For simplicity, we are going to treat each datapoint here as if it were a different subject, as if they were 1 subject of each gender at each age.
 
 ```{r}
 summary(lm(median ~ age, data=subset(vocab, gender == 'F')))
 
-anova(lm(median ~ age, data=subset(vocab, gender == 'F'))) 
-
 summary(aov(median ~ age, data=subset(vocab, gender == 'F')))
 ```
 
-As you can see above, when we have a simple, one-parameter model, we actually get consistent results across all of these methods.
+What we expect is that a single term linear model should give us the exact same results as a one-way ANOVA. This is actually what we see when compare these models. Although the ANOVA did not return a precise estimate of the slope (like `lm()`), their p-values are identical and the ANOVA's F-value is exactly the linear model's t, squared:
 
-With two main effects, these models are still identical:
+```{r}
+sqrt(630.2)
+```
+
+## Two factor models, no interaction
+
+What happens when we add in a second main effect (but no interaction)?
 
 ```{r}
 summary(lm(median ~ age + gender, data=vocab))
-anova(lm(median ~ age + gender, data=vocab))
 summary(aov(median ~ age + gender, data=vocab))
 ```
 
-However, they diverge when we start to enter interactions.
+Perfect again! Exact same results using both methods which is what we would expect when we have a two-way, non-interaction ANOVA and a two-parameter linear model.
 
-Note: the `*` in the model syntax below indicates main effects and interactions between all parameters.
+## Two factor models, with interactions
+
+What happens when we allow our two factors to interact in predicting vocabulary?
 
 ```{r}
 summary(lm(median ~ age*gender, data=vocab))
-anova(lm(median ~ age*gender, data=vocab))
 summary(aov(median ~ age*gender, data=vocab))
 ```
 
-Several questions arise from these models:
-* Why do they differ?
-* Why is the gender effect *positive*? (i.e., It says boys have an advantage, when the plots say something very different!)
+Now we see (a) vastly different results between the models and, (b) strange results within the linear model especially. Let's break this down.
 
-The answers lay in the way the model is constructed, and how the variables are coded.
+In our linear model, we still have our significant effect of age (which is good) but now no reliable effect of gender (which is bad) and a positive estimate of being male (which is very bad).
 
-With `aov()`, remember, we assess the influence of each parameter in order. Let's see an example of this:
+In our ANOVA, we see a wildly significant effect of age, and a wildly significant effect of gender.
 
-```{r}
-summary(aov(median ~ age + gender, data=vocab))
-summary(aov(median ~ gender + age, data=vocab))
+What's going on?
 
-cor.test(vocab$age, as.numeric(vocab$gender))
-```
-  
-But wait - we don't see any influences of order here! That's because these two factors are uncorrelated, and order only starts to become an issue when we have *any* (even trivial) correlation between our predictive factors.
+## Why are lm() and aov() different?
 
-To demonstrate, let's take some random numbers (which will have some sort of correlation, by chance), and see how order matters:
+The answer to this questions lays in (a) the ways the models are fitted, and (b) the way our parameters are coded before running the model. We normally don't have to think about either of these things in SPSS, for example, because they are done for us automatically.
 
-```{r}
-  test1 <- rnorm(20)
-  test2 <- rnorm(20)
-  test3 <- rnorm(20)
-  summary(aov(test3 ~ test1 + test2))
-  summary(aov(test3 ~ test2 + test1))
-```
+### lm()
 
-Scary! Let's abandon `aov()` now... We don't want order to matter.
+Let's first look at the linear model which, at first glance, seems the most questionable.
 
-With lm(), we are now calculating the effect of each parameter (e.g., age, gender) after accounting for each other parameter, including the interaction. This is what most of us are used to in analyses (unlike `aov()`). 
+Specifically, (1) why did it not return a main effect of gender?
+              (2) why is its estimate of the effect of being male positive, when each male "subject" is lower than the female at that same age?
 
-However, this introduces another problem. Because it's now accounting for the interaction, when we look for the main effect of "gender" -- holding age constant (at 0) -- we don't get what we think of as a main effect of gender. We actually get the model's best guess of the effect at gender at age == 0 months in light of the main effect of age and its interaction with gender.
-
-To illustrate:
+Let's re-fit our model and save its results in a variable.
 
 ```{r}
 model <- lm(median ~ age*gender, data=vocab)
 ```
 
-See the predictions using this model fit:
+We want to know what this model fit looks like. We can do this by retrieving the predictions of our model and storing them in our dataframe.
 
 ```{r}
 vocab$predictions <- predict(model, vocab)
 ```
 
-Visualize our model predictions. Note the y-axis range.
+Rather than comparing our predictions and actual values line-by-line, it's best to visualize them on a single plot.
+
+Here we will plot the data like we did before, however we are now going to add a new "layer" to the plot which will include our predicted values.
 
 ```{r}
-ggplot(vocab, aes(x=age, y=predictions, color=gender)) + 
-                    geom_point() +
-                    stat_smooth(method="lm") +
+ggplot(vocab, aes(x=age, y=median, color=gender)) + 
+                    geom_point() + # the raw data, plots the 'y' aesthetic above
+                    geom_line(aes(y=predictions)) + # our predictions, plotted as a line
                     scale_x_continuous(name="Age (Months)") +
                     scale_y_continuous(name="Predicted Vocabulary")
 ```
 
-What we actually want to know is what the effect of gender is on average, i.e., at the average age (here, around ~22 months).
+Looks like a good fit! Indeed, our model fit maps exactly on to the line of best we can generate using ggplot:
 
-Instead, what the model is doing is setting the Age to 0 months and telling us whether there is an estimated effect of gender at that point.
+```{r}
+ggplot(vocab, aes(x=age, y=median, color=gender)) + 
+                    geom_point() + # the raw data, plots the 'y' aesthetic above
+                    stat_smooth(method="lm", se = FALSE) + # add a line of best fit, without SE
+                    scale_x_continuous(name="Age (Months)") +
+                    scale_y_continuous(name="Predicted Vocabulary")
+```
 
-We can visualize this problem by making extrapolated predictions for a dataset that gets the model's predictions down to age 0 (which of course doesn't make sense for productive vocabulary, given the limited vocabularies apparent as newborns).
+So what's wrong with our model?
+
+Let's think about we want to know with each parameter:
+
+For Age, we want to know what the effect of Age is while controlling for Gender.
+
+For Gender, we want to know what the effect of Gender is while controlling for Age.
+
+When we say "Controlling" in a linear model, what we actually mean is "while holding that parameter constant at zero."
+
+If we set Age to 0 in our current model, as the variables are currently coded, we are essentially asking for the effect of Gender on a newborn's vocabulary.
+
+We can extrapolate our model's predictions down to a newborn to take the model's perspective on this question...
 
 ```{r}
 vocab_extrapolations <- data.frame(
@@ -165,15 +171,16 @@ colnames(vocab_extrapolations) <- c('age','gender','prediction')
 vocab_extrapolations$prediction <- predict(model, vocab_extrapolations)
 
 ggplot(vocab_extrapolations, aes(x=age, y=prediction, color=gender)) + 
-                                    geom_point() +
-                                    stat_smooth(method="lm") +
+                                    geom_line() +
                                     scale_x_continuous(name="Age (Months)") +
                                     scale_y_continuous(name="Predicted Vocabulary")
 ```
 
-Now we see why the model did what it did: At age 0, the slight, estimated (non-significant) interaction actually leads to a small predicted *advantage* for boys.
+Now everything should begin to make sense. Our non-significant, positive effect of being a Male is the model telling us that it thinks male newborns have a slight advantage on female newborns. This obviously doesn't make sense.
 
-This is giving us an answer to a question we didn't want to ask. To fix it, let's *center* the age variable so we can estimate the effect of gender holding age constant at its *average* value, not 0.
+This wasn't a problem for us before adding the interaction term because, without the interaction, it's estimate of the effect of Gender is constant and therefore equally reliable at all ages.
+
+To fix this problem, let's *center* the age variable so when we tell the model to give us the effect of gender while controlling for Age, we are holding Age constant at the *mean* age for our sample.
 
 ```{r}
 vocab$ageC <- scale(vocab$age, center=T, scale=F)
@@ -181,62 +188,119 @@ vocab$ageC <- scale(vocab$age, center=T, scale=F)
 summary(lm(median ~ ageC*gender, data=vocab))
 ```
   
-This is better: a significant, negative effect for gender. But the t's and p-values still don't line up perfectly with the anova() and aov() models...
+This is better: a significant, negative effect for gender.
 
-Tthis is due to a very similar problem that we had before. Gender is treatment-coded (i.e., with a 'reference' level [Female] and treatment level [Male]) so what our linear model is showing us for the effect of Age is actually the effect of Age for Females, and the interaction is the difference between this effect and the effect of Age for Males.
+Now, we have to think about our effect of Age. As things stand, when we hold Gender constant at zero, we are actually fixing the gender parameter at "Female." This "treament coding" of variables is the default for factor columns in R dataframes.
 
-Again, this is answering a question we didn't want to ask. What we want to know is whether age differs when holding gender constant at its "average". We can do this by sum-coding gender.
-
-We can set a factor to be sum-coded using `contrasts()`. This will, for 2 factors, set them to be -1 and +1 respectively.
+We will fix this in the exact same way as before: centering. To center a non-numeric factor variable with only 2 levels, we will re-code it as a numeric variable where our two groups differ by a total of 1 unit. This is called deviation coding:
 
 ```{r}
-contr.sum(2)
+vocab$genderC <- ifelse(vocab$gender == 'F', -.5, .5)
+vocab$genderC <- scale(vocab$genderC, center=T, scale=F) # make sure it's centered
 
-contrasts(vocab$gender) <- 'contr.sum'
-
-summary(lm(median ~ ageC*gender, data=vocab))
-```
-
-Now, our estimate of Age is OK but our estimate of gender is a bit counterintuitive. It represents 1/2 of the estimated main effect of gender because the difference between our sum-codes is 2 and it's therefore giving us the estimate *for each 1 unit of gender*.
-
-My preferred way is to manually use deviation contrasts (-.5 and +.5 respectively) so that we get an estimate equivalent to the main effect of gender holding all other factors constant.
-
-```{r}
-vocab$genderContrast <- -.5
-vocab[which(vocab$gender == 'M'), 'genderContrast'] <- .5
-summary(lm(median ~ ageC*genderContrast, data=vocab))
+summary(lm(median ~ ageC*genderC, data=vocab))
 ```
 
 Now we have a proper model!
 
 The moral here is that we need to pay close attention to the way our variables are treated (e.g., centered, coded, standardized) because they change the way the model's effects are estimated and intepreted. It's more of an issue in R than elsewhere because, unlike SPSS and other packages which do all of this automatically in the background, R won't assume you want these transformations done in the background.
 
-I recommend deviation-coding all factors and centering all numeric vectors, in general.
+I see mistakes with this all of the time. Here are my recommendations when fitting any linear model in R:
+
+  (1) Deviation code and center all variables, by default.
+  
+  (2) Ask yourself, do the model's estimates make sense intuitively?
+  
+  (3) Visualize your raw data and model predictions.
+  
+  (4) Try to replicate main effect parameter's estimate using arithmetic. For example:
+  
+```{r}
+# our intercept should be equivalent to our total mean
+mean(vocab$median)
+
+# our gender effect should equal the difference between our male and female groups
+mean(vocab[which(vocab$gender=='F'), 'median']) - mean(vocab[which(vocab$gender=='M'), 'median'])
+```
+
+The reason we have to be so careful with `lm()` is that what it's giving us is *simple* effects -- estimates of the effect of a single variable while holding other independent variables constant at one level.
+
+What we usually want are *main effects* -- estimates of the effect of a single variable while holding all other independent variables at their average.
+
+By centering and using deviation-coding, we can get main effects from `lm()`.
+
+### aov()
+
+But what `aov()`? If you remember, it wasn't so bad. It already knew there was a reliable main effect of gender (though we don't know which direction, because we haven't plotted its predictions).
+
+Is it better than `lm()`? No!
+
+Here's why:
+
+```{r}
+# generate three random vectors
+random_dv <- rnorm(30,5,5)
+random_iv1 <- rnorm(30,5,5)
+random_iv2 <- rnorm(30,5,5)
+
+# fit a model using these random vectors
+summary(aov(random_dv ~ random_iv1 + random_iv2))
+
+# now enter them in the opposite order:
+summary(aov(random_dv ~ random_iv2 + random_iv1))
+```
+
+We got different answers depending on the order we entered the variables. This is because `aov()` uses Type I (sequential) sums of squares. No amount of re-coding or centering can overcome this property and give us the answers we (probably) want.
+
+Notice, however, that changing the order of age and gender in our model as no effect:
+
+```{r}
+summary(aov(median ~ age + gender, data=vocab))
+
+summary(aov(median ~ gender + age, data=vocab))
+```
+
+This is because these predictors are perfectly uncorrelated (because we have a balanced design):
+
+```{r}
+cor.test(vocab$age, as.numeric(vocab$gender))
+```
+  
+With even the slightest correlation, our estimates are going to change based on order of entry in the model.
+
+## When should I use aov()?
+
+There is only one time you should use `aov()` -- repeated-measures ANOVAs. In tutorial 3, we will begin using mixed-effects models which, by way of random effects, serve much the same function. However, sometimes you just want a good old-fashioned repeated measures ANOVA and, *provided your design is balanced and everything is coded properly*, you will get an appropriate answer from `aov()`.
+
+Here's a quick example:
+
+```{r}
+# build a quick dataframe
+dv <- c(1,3,4,2,2,3,2,5,6,3,4,4,3,5,6)
+subject <- factor(rep(paste0('s',1:5),each=3))
+myfactor <- factor(rep(paste0('f',1:3),times=5))
+mydata <- data.frame(dv, subject, myfactor)
+
+model <- aov(dv ~ myfactor + Error(subject/myfactor), data=mydata)
+summary(model)
+```
+
+## Other helpful lm() functions
 
 Here are some other helpful functions for linear models:
 
 ```{r}
-model <- lm(median ~ ageC*genderContrast, data=vocab)
+model <- lm(median ~ ageC*genderC, data=vocab)
 
 # confint(): get confidence intervals for estimates
 confint(model)
 
 # pairwise.t.test(): run pairwise.t.tests between groups (ignoring other factors)
-pairwise.t.test(vocab$median, vocab$genderContrast)
+pairwise.t.test(vocab$median, vocab$genderC)
+  # insignificant, because we aren't controlling for Age
 
-# drop1(): drop each parameter and do an F test
-# useful if you want to get Type III sums of squares (like SPSS) for
-# aov() (i.e., Type I) models
-
-type1_model <- aov(median ~ age*gender, data=vocab)
-type3_model <- lm(median ~ age*gender, data=vocab)
-
-summary(type1_model) # type 1 p-values, calculated BEFORE interaction
-summary(type3_model) # type 3 p-values, calculated AFTER interaction
-drop1(type1_model,~.,test="F") # makes the type 1 model look like a type 3 model
-
-# these are both type 3, so they align perfectly
-summary(model)
+# drop1(): drop each parameter and retrieve an F, for reporting like an ANOVA
+model <- lm(median ~ ageC*genderC, data=vocab)
 drop1(model,~.,test="F")
 ```
 
