@@ -176,18 +176,16 @@ and greater control over the appearance:
 
 ```{r}
 ggplot(vocab, aes(x=age, y=median, color=gender)) +
-                          geom_point()
+        geom_point()
 
 ggplot(vocab, aes(x=age, y=median, color=gender)) +
         geom_pointrange(aes(min=median-ci.l, max=median+ci.h), position=position_dodge(.4)) +
-        scale_x_continuous(name="Age (Months)") +
-        scale_y_continuous(name="Productive Vocabulary")
+        labs(x="Age (Months)", y="Productive Vocabulary")
 
 ggplot(vocab, aes(x=age, y=median, fill=gender)) +
         geom_bar(stat='identity', position=position_dodge()) +
         geom_errorbar(aes(ymax=median+ci.h, ymin=median-ci.l), position=position_dodge(.9), width=0.25) +
-        scale_x_continuous(name="Age (Months)") +
-        scale_y_continuous(name="Productive Vocabulary")
+        labs(x="Age (Months)", y="Productive Vocabulary")
 ```
 
 We'll gradually use more and more advanced aspects of ggplot throughout these tutorials. For now, we are simply plotting single variables from a dataframe (much like we could with Excel). However, by the 4th tutorial, we'll be using ggplot to group, transform, and summarize our (almost) raw data and visualize it in a single shot.
