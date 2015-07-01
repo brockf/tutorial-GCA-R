@@ -125,6 +125,7 @@ agg_sub_items <- data %>%
                  ungroup()
   
 agg_sub_items$TargetCoded <- ifelse(agg_sub_items$Target == 'Artefact', -.5, .5)
+agg_sub_items$TargetCoded <- scale(agg_sub_items$TargetCoded, center=T, scale=F)
 ```
 
 Fit a mixed-effects model allowing the intercept (represented by a "1") to vary by both Participants and Trials. By allowing the intercept to vary by subjects and items, we are allowing the model to estimate (and thus control for) each participants' and trials' mean tendency to look (cause participants to) look at the animal regardless of condition. For example, Billy may just love animals while Sammy may hate animals. Importantly, we want to know whether they word they heard (represented here by TargetCoded) caused them to look more/less to the animal above and beyond these baseline preferences.
