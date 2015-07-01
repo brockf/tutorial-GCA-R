@@ -14,7 +14,7 @@ Install the packages we'll be using today, and load ggplot -- which we'll use in
 
 ```{r quiet=T}
 # commented out because I already have these
-# install.packages('reshape2','dplyr','ggplot2','lme4','lmerTest'')
+# install.packages('reshape2','dplyr','ggplot2','lme4','lmerTest')
 
 library(ggplot2)
 ```
