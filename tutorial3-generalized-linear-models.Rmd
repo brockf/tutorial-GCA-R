@@ -125,6 +125,7 @@ agg_sub_items <- data %>%
                  ungroup()
   
 agg_sub_items$TargetCoded <- ifelse(agg_sub_items$Target == 'Artefact', -.5, .5)
+agg_sub_items$TargetCoded <- scale(agg_sub_items$TargetCoded, center=T, scale=F)
 ```
 
 Fit a mixed-effects model allowing the intercept (represented by a "1") to vary by both Participants and Trials. By allowing the intercept to vary by subjects and items, we are allowing the model to estimate (and thus control for) each participants' and trials' mean tendency to look (cause participants to) look at the animal regardless of condition. For example, Billy may just love animals while Sammy may hate animals. Importantly, we want to know whether they word they heard (represented here by TargetCoded) caused them to look more/less to the animal above and beyond these baseline preferences.
@@ -219,9 +220,9 @@ One way you can decide this is by adhering to guidelines. Unfortunately, you'll 
 
 For example, one school of thought (see Barr et al., 2013) is to "keep it maximal". That is, include every random effect that your experimental design permits (i.e., every factor that appeared across subjects or trials). Another school of thought (see Bates et al., 2015) is to keep it parsimonious. Don't overcomplexify your models with lots of random slopes, as this will make model estimates increasingly hard to reconcile with the data and risk overparamterizing your model:
 
-```{r}
-# commented out because it kills knitr
-# model <- lmer(PropAnimal ~ TargetCoded + (1 + TargetCoded + Trial | ParticipantName) + (1 | Trial), data = agg_sub_items)
+```{r, error=TRUE}
+# Will return error: too many random effects
+model <- lmer(PropAnimal ~ TargetCoded + (1 + TargetCoded + Trial | ParticipantName) + (1 | Trial), data = agg_sub_items)
 ```
 
 ### Model comparison
